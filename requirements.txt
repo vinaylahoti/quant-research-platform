@@ -1,0 +1,18 @@
+# Install per phase — you do NOT need everything at once.
+#
+# Phase 0 (tools/hurdle.py): nothing. Pure standard library. Just run it.
+#
+# Phase 1 (data layer): uncomment when you start it
+# pandas
+# pyarrow
+# binance-historical-data
+#
+# Phase 2-3 (signals + research backtest):
+# numpy
+# vectorbt
+#
+# Phase 4 (paper engine): install separately, it's heavy —
+#   see https://www.freqtrade.io/en/stable/installation/
+#
+# Phase 3+ (plots / reports):
+# matplotlib

@@ -1,0 +1,32 @@
+# Project data artifacts
+data/
+
+# Python bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Test and tooling caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+tests/.tmp*/
+
+# Notebook checkpoints
+.ipynb_checkpoints/
+
+# OS/editor clutter
+.DS_Store
+Thumbs.db
+
+# Local logs
+*.log
