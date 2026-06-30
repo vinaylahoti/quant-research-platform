@@ -1,5 +1,5 @@
-# Project data artifacts
-data/
+# Project data artifacts (repo root only — /data/ not src/data/)
+/data/
 
 # Python bytecode and caches
 __pycache__/
