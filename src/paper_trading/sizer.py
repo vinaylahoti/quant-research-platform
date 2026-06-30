@@ -95,6 +95,42 @@ def _check_closes(symbol: str, closes: list[float]) -> None:
             )
 
 
+def fetch_live_universe(top_n: int = 30) -> list[str]:
+    """
+    Return the current top-N USDT-M perpetual futures symbols ranked by
+    24h quote volume, via Binance's public ticker endpoint (no auth required).
+
+    This replaces the featurestore-backed PointInTimeUniverse in production:
+    the backtests needed historical point-in-time correctness; the live
+    scheduler only needs to know what's liquid right now.
+
+    Raises on failure after RETRY_MAX_ATTEMPTS — caller handles it.
+    """
+    url = "https://fapi.binance.com/fapi/v1/ticker/24hr"
+    last_exc: Exception = RuntimeError("No attempts made")
+
+    for attempt in range(RETRY_MAX_ATTEMPTS):
+        try:
+            resp = requests.get(url, timeout=10)
+            resp.raise_for_status()
+            tickers = resp.json()
+            usdt_perps = [
+                t for t in tickers
+                if isinstance(t.get("symbol"), str)
+                and t["symbol"].endswith("USDT")
+                and float(t.get("quoteVolume", 0)) > 0
+            ]
+            usdt_perps.sort(key=lambda t: float(t["quoteVolume"]), reverse=True)
+            return [t["symbol"] for t in usdt_perps[:top_n]]
+        except Exception as exc:
+            last_exc = exc
+            if attempt < RETRY_MAX_ATTEMPTS - 1:
+                delay = RETRY_BASE_DELAY_SECONDS * (2 ** attempt)
+                time.sleep(delay)
+
+    raise last_exc
+
+
 def fetch_klines(symbol: str, limit: int = VOL_LOOKBACK_BARS + 1) -> list[float]:
     """
     Fetch recent 1h close prices from Binance USDT-M futures public API.

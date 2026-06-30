@@ -5,17 +5,17 @@ Run with:
     py -m src.paper_trading.scheduler
 
 What this does each hour:
-  1. Loads the WS4 point-in-time universe (most recent available date).
+  1. Fetches current top-30 USDT-M symbols by 24h volume from Binance API.
   2. Fetches recent 1h klines from Binance public API for each symbol.
   3. Computes vol-targeted paper position size (WS5 model, no directional signal).
-  4. Logs every decision to data/paper_trading.db.
+  4. Logs every decision to the SQLite trade log.
   5. Writes a heartbeat file for the dead-man's switch.
 
 Error policy (decided in ws9_vol_portfolio.md, not at runtime):
-  - Transient failure on one symbol: retry 3× with exponential backoff.
+  - Transient failure on one symbol: retry 3x with exponential backoff.
     If all retries fail, log a null-fill row for that symbol and continue.
   - Tick-level unrecoverable error (DB write failure, assertion): send alert,
-    do NOT write heartbeat, halt — manual restart required.
+    do NOT write heartbeat, halt -- manual restart required.
   - A gracefully-skipped symbol still counts as a successful tick for the
     heartbeat (the scheduler is alive; the symbol data was unavailable).
 """
@@ -32,29 +32,18 @@ from src.paper_trading.config import (
 )
 from src.paper_trading.heartbeat import HeartbeatThread, send_alert, write_heartbeat
 from src.paper_trading.logger import TradeLogger, TradeRecord
-from src.paper_trading.sizer import make_execution_config, size_symbol
-from src.universe.builder import PointInTimeUniverse
+from src.paper_trading.sizer import fetch_live_universe, make_execution_config, size_symbol
 
 
-def _load_universe() -> tuple[PointInTimeUniverse, list[str]]:
-    """
-    Build the WS4 membership table and return the most-recent-available symbols.
-
-    The featurestore covers data through the last downloaded date (currently
-    end of 2025). as_of(today) would return nothing for dates beyond that.
-    We use the latest date present in the membership table so the system
-    always gets a real, point-in-time universe rather than an empty one.
-    """
-    pit = PointInTimeUniverse()
-    table = pit.membership_table()
-    latest_date = table["date"].max()
-    members = pit.as_of(latest_date)
-    symbols = [m.symbol for m in members]
+def _load_universe() -> list[str]:
+    """Fetch current top-30 USDT-M symbols by 24h quote volume from Binance."""
+    symbols = fetch_live_universe(top_n=30)
     print(
-        f"[scheduler] Universe as of {latest_date.date()}: {len(symbols)} symbols",
+        f"[scheduler] Live universe: {len(symbols)} symbols "
+        f"(top-30 by 24h volume)",
         flush=True,
     )
-    return pit, symbols
+    return symbols
 
 
 def _now_utc() -> str:
@@ -135,12 +124,12 @@ def run(*, once: bool = False) -> None:
     watchdog.start()
 
     logger = TradeLogger()
-    _pit, symbols = _load_universe()
+    symbols = _load_universe()
 
     if not symbols:
         send_alert(
-            subject="Universe is empty — scheduler cannot start",
-            body="PointInTimeUniverse returned no symbols. Check the featurestore.",
+            subject="Universe is empty - scheduler cannot start",
+            body="fetch_live_universe() returned no symbols. Check Binance API connectivity.",
         )
         watchdog.stop()
         raise RuntimeError("Universe is empty")
@@ -155,7 +144,7 @@ def run(*, once: bool = False) -> None:
             # if this keeps happening.
             import traceback
             send_alert(
-                subject=f"Unrecoverable tick error — HALTED",
+                subject="Unrecoverable tick error - HALTED",
                 body=f"UTC: {_now_utc()}\n\n{traceback.format_exc()}",
             )
             watchdog.stop()
