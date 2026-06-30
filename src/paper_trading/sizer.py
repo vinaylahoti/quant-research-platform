@@ -67,6 +67,12 @@ def compute_target_size_from_returns(
 # is treated as corrupt. 50% per hour is already an extreme move (covers
 # LUNA-style collapses and FTX-day BTC). Anything larger almost certainly
 # means a format change caused us to parse the wrong field.
+# Kept at 50% deliberately even after a real legitimate skip (TACUSDT, 2026-06-30,
+# 55% 1h move): this is a sizing system, not a directional bet -- if a token is
+# moving that fast it should be skipped for that tick, not sized into. The cost
+# of one null-fill on one thin symbol is lower than the cost of a looser guard
+# that misses actual bad data. Do not raise this threshold without re-reading
+# that reasoning first.
 _MAX_CONSECUTIVE_RATIO = 1.50
 
 
