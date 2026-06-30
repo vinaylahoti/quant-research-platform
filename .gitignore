@@ -30,3 +30,9 @@ Thumbs.db
 
 # Local logs
 *.log
+
+# Credentials — never commit
+.env
+
+# SQLite databases (operational data and test artefacts)
+*.db

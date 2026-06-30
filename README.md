@@ -54,6 +54,10 @@ quant-bot/
 └── notes/
 ```
 
+## Known limitation — universe completeness
+
+The point-in-time universe includes the current top-30 actively-traded symbols plus a small fixed set of historically significant delisted symbols: LUNA and FTT. It is NOT a complete historical reconstruction of every symbol that ever traded. Smaller delisted coins are not represented. Backtest results should be read with this in mind — survivorship bias is reduced, not eliminated.
+
 ---
 
 ## ROADMAP

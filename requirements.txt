@@ -16,3 +16,7 @@
 #
 # Phase 3+ (plots / reports):
 # matplotlib
+
+# WS9 paper trading:
+python-dotenv  # reads .env credentials for Gmail SMTP alerting
+requests       # Binance public API for live 1h klines (already installed)

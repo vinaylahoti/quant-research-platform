@@ -4,6 +4,10 @@ WS1 research log.
 This module gives the project one append-only place to record every experiment.
 We use SQLite because it is built into Python, durable, and easy to query.
 
+WS3's validation harness now calls log_experiment() automatically on every run.
+Manual calls still exist for one-off utilities and tests, but validation itself
+should never bypass this log.
+
 The design goal is simple:
 - one row per experiment
 - every row gets a running trial number
