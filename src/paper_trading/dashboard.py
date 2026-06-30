@@ -702,9 +702,10 @@ setInterval(refresh, 60_000);
 
 def main() -> None:
     _ensure_schema()
-    port = int(os.environ.get("PORT", os.environ.get("DASHBOARD_PORT", "8080")))
+    port = int(os.environ.get("DASHBOARD_PORT", "8080"))
     print(f"[dashboard] Listening on http://0.0.0.0:{port}", flush=True)
-    app.run(host="0.0.0.0", port=port, debug=False)
+    from waitress import serve
+    serve(app, host="0.0.0.0", port=port)
 
 
 if __name__ == "__main__":

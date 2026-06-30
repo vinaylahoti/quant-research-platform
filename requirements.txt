@@ -5,3 +5,4 @@ duckdb
 requests
 python-dotenv
 flask
+waitress
