@@ -4,3 +4,4 @@ numpy
 duckdb
 requests
 python-dotenv
+flask
