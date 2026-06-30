@@ -19,7 +19,8 @@ _REPO_ROOT = Path(__file__).resolve().parents[2]
 _DATA_DIR: Path = Path(os.environ.get("PAPER_TRADING_DATA_DIR", str(_REPO_ROOT / "data")))
 
 # Rebalance cadence: 1h bars, matching the existing WS5 execution model.
-REBALANCE_INTERVAL_SECONDS: int = 3_600
+# TEMPORARILY set to 60 for Railway dead-man's switch test — restore to 3_600
+REBALANCE_INTERVAL_SECONDS: int = 60
 
 # Number of 1h bars used to estimate realized volatility.
 # 24 bars = 24h trailing window. Same formula as size_position() in WS5.
@@ -41,7 +42,8 @@ TAKER_FEE_BPS: float = 4.0
 PAPER_PORTFOLIO_USD: float = 10_000.0
 
 # Dead-man's switch fires if the main loop is silent for this many intervals.
-HEARTBEAT_TIMEOUT_MULTIPLIER: int = 2
+# TEMPORARILY set to 1 for Railway dead-man's switch test — restore to 2
+HEARTBEAT_TIMEOUT_MULTIPLIER: int = 1
 
 # Persistence paths — all rooted under _DATA_DIR so a single env var
 # controls whether they land on the Railway Volume or the local repo.
