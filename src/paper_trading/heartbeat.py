@@ -2,28 +2,35 @@
 Dead-man's switch for WS9 paper trading.
 
 Two alert triggers:
-  1. The main loop goes silent for > 2 × REBALANCE_INTERVAL_SECONDS.
+  1. The main loop goes silent for > HEARTBEAT_TIMEOUT_MULTIPLIER x REBALANCE_INTERVAL_SECONDS.
   2. An uncaught exception escapes the main loop's top-level handler.
 
-Alerting mechanism: Gmail SMTP to the address in ALERT_TO_EMAIL (.env).
-Requires GMAIL_APP_PASSWORD set in .env (an App Password, not the account
-password — create one at myaccount.google.com → Security → App passwords).
+Alerting mechanism: Resend HTTP API (https://resend.com).
+Railway blocks outbound SMTP (ports 465/587), so raw smtplib cannot be used
+from a deployed container. Resend sends email over HTTPS, which Railway allows.
+
+Required environment variables:
+  RESEND_API_KEY   - Resend API key (set in Railway Variables, never committed)
+  ALERT_TO_EMAIL   - destination address for all alerts
+
+The from address is onboarding@resend.dev (Resend's shared sender, works on
+the free tier without domain verification). To use your own domain as sender,
+verify it in the Resend dashboard and set ALERT_FROM_EMAIL accordingly.
 
 Confirmation procedure (required before first live run):
-  1. Start the heartbeat thread.
-  2. Comment out write_heartbeat() in the scheduler for one interval.
-  3. Confirm an alert email arrives.
-  4. Restore write_heartbeat() and restart.
+  1. Start the scheduler with write_heartbeat() commented out.
+  2. Confirm an alert email arrives at ALERT_TO_EMAIL within one timeout window.
+  3. Restore write_heartbeat() and redeploy.
 """
 
 from __future__ import annotations
 
+import datetime
 import os
-import smtplib
 import threading
 import time
-from email.message import EmailMessage
-from pathlib import Path
+
+import requests
 
 from src.paper_trading.config import (
     HEARTBEAT_PATH,
@@ -33,44 +40,62 @@ from src.paper_trading.config import (
 
 _TIMEOUT_SECONDS = REBALANCE_INTERVAL_SECONDS * HEARTBEAT_TIMEOUT_MULTIPLIER
 
+_RESEND_API_URL = "https://api.resend.com/emails"
+_DEFAULT_FROM = "onboarding@resend.dev"
+
 
 def _load_env() -> tuple[str, str, str]:
-    """Read GMAIL_SENDER, GMAIL_APP_PASSWORD, ALERT_TO_EMAIL from environment."""
+    """Read RESEND_API_KEY, ALERT_TO_EMAIL, ALERT_FROM_EMAIL from environment."""
     try:
         from dotenv import load_dotenv
         load_dotenv()
     except ImportError:
-        pass  # dotenv optional; caller can set env vars directly
+        pass
 
-    sender = os.environ.get("GMAIL_SENDER", "")
-    password = os.environ.get("GMAIL_APP_PASSWORD", "")
+    api_key = os.environ.get("RESEND_API_KEY", "")
     recipient = os.environ.get("ALERT_TO_EMAIL", "")
-    return sender, password, recipient
+    sender = os.environ.get("ALERT_FROM_EMAIL", _DEFAULT_FROM)
+    return api_key, recipient, sender
 
 
 def send_alert(subject: str, body: str) -> None:
-    """Send an email alert via Gmail SMTP SSL. Logs to stderr if it fails."""
-    sender, password, recipient = _load_env()
-    if not all([sender, password, recipient]):
+    """
+    Send an email alert via Resend's HTTP API.
+
+    Logs success or failure to stdout. Never raises — a failed alert must not
+    crash the scheduler or the heartbeat thread.
+    """
+    api_key, recipient, sender = _load_env()
+
+    if not api_key or not recipient:
         print(
-            f"[heartbeat] ALERT (email not configured): {subject}\n{body}",
+            f"[heartbeat] ALERT (Resend not configured): {subject}\n{body}",
             flush=True,
         )
         return
 
-    msg = EmailMessage()
-    msg["Subject"] = f"[WS9 paper-trading] {subject}"
-    msg["From"] = sender
-    msg["To"] = recipient
-    msg.set_content(body)
+    payload = {
+        "from": sender,
+        "to": [recipient],
+        "subject": f"[WS9 paper-trading] {subject}",
+        "text": body,
+    }
 
     try:
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, timeout=15) as smtp:
-            smtp.login(sender, password)
-            smtp.send_message(msg)
-        print(f"[heartbeat] Alert email sent to {recipient}: {subject}", flush=True)
+        resp = requests.post(
+            _RESEND_API_URL,
+            json=payload,
+            headers={"Authorization": f"Bearer {api_key}"},
+            timeout=15,
+        )
+        resp.raise_for_status()
+        email_id = resp.json().get("id", "unknown")
+        print(
+            f"[heartbeat] Alert email sent to {recipient} via Resend "
+            f"(id={email_id}): {subject}",
+            flush=True,
+        )
     except Exception as exc:
-        # repr() avoids any non-ASCII in the exception message hitting cp1252.
         print(f"[heartbeat] FAILED to send alert email: {repr(exc)}", flush=True)
 
 
@@ -111,13 +136,12 @@ class HeartbeatThread(threading.Thread):
         while not self._stop_event.is_set():
             age = _last_heartbeat_age()
             if age > _TIMEOUT_SECONDS:
-                import datetime
                 send_alert(
                     subject=f"SILENT for {age/3600:.1f}h - check immediately",
                     body=(
                         f"No heartbeat received for {age:.0f}s "
                         f"(threshold {_TIMEOUT_SECONDS}s).\n"
-                        f"UTC: {datetime.datetime.utcnow().isoformat()}\n"
+                        f"UTC: {datetime.datetime.now(datetime.timezone.utc).isoformat()}\n"
                         "The paper-trading scheduler may have crashed or stalled."
                     ),
                 )
