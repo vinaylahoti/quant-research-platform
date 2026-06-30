@@ -8,9 +8,15 @@ definition to manufacture trades.
 
 from __future__ import annotations
 
+import os
 from pathlib import Path
 
 _REPO_ROOT = Path(__file__).resolve().parents[2]
+
+# On Railway: set PAPER_TRADING_DATA_DIR=/data (the Volume mount path) so
+# the trade log, heartbeat, and reports survive redeploys.
+# Locally: leave unset; falls back to data/ inside the repo root.
+_DATA_DIR: Path = Path(os.environ.get("PAPER_TRADING_DATA_DIR", str(_REPO_ROOT / "data")))
 
 # Rebalance cadence: 1h bars, matching the existing WS5 execution model.
 REBALANCE_INTERVAL_SECONDS: int = 3_600
@@ -37,10 +43,11 @@ PAPER_PORTFOLIO_USD: float = 10_000.0
 # Dead-man's switch fires if the main loop is silent for this many intervals.
 HEARTBEAT_TIMEOUT_MULTIPLIER: int = 2
 
-# Persistence paths.
-LOG_DB_PATH: Path = _REPO_ROOT / "data" / "paper_trading.db"
-HEARTBEAT_PATH: Path = _REPO_ROOT / "data" / "paper_trading_heartbeat.txt"
-REPORT_DIR: Path = _REPO_ROOT / "data" / "paper_trading_reports"
+# Persistence paths — all rooted under _DATA_DIR so a single env var
+# controls whether they land on the Railway Volume or the local repo.
+LOG_DB_PATH: Path = _DATA_DIR / "paper_trading.db"
+HEARTBEAT_PATH: Path = _DATA_DIR / "paper_trading_heartbeat.txt"
+REPORT_DIR: Path = _DATA_DIR / "paper_trading_reports"
 
 # Binance USDT-M perpetual futures klines endpoint (public, no auth required).
 BINANCE_FAPI_KLINES_URL: str = "https://fapi.binance.com/fapi/v1/klines"
