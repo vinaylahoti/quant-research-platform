@@ -1,5 +1,0 @@
-{
-  "deploy": {
-    "startCommand": "python -m src.paper_trading.scheduler"
-  }
-}
