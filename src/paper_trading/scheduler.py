@@ -108,8 +108,7 @@ def _run_tick(
     # This is the only point where write_heartbeat() is called per tick,
     # so a DB failure above prevents the heartbeat from being written —
     # causing the dead-man's switch to fire for any true unrecoverable error.
-    # TEMPORARILY commented out for Railway dead-man's switch test — restore after alert confirmed
-    # write_heartbeat()
+    write_heartbeat()
 
 
 def run(*, once: bool = False) -> None:
