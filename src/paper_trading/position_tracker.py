@@ -63,6 +63,17 @@ class PositionTracker:
             conn = sqlite3.connect(self._db_path)
             conn.row_factory = sqlite3.Row
 
+            # Diagnostic: how many total rows and WS11 rows exist?
+            total_rows = conn.execute("SELECT COUNT(*) FROM trades").fetchone()[0]
+            ws11_rows = conn.execute(
+                "SELECT COUNT(*) FROM trades WHERE open_units_after IS NOT NULL"
+            ).fetchone()[0]
+            print(
+                f"[position_tracker] DB has {total_rows} total rows, "
+                f"{ws11_rows} with WS11 data",
+                flush=True,
+            )
+
             # Latest state per symbol
             rows = conn.execute("""
                 SELECT t.symbol, t.open_units_after, t.vwap_entry_price
@@ -90,18 +101,26 @@ class PositionTracker:
             if result:
                 self._total_realized_pnl = result[0]
 
-            if self._states:
-                open_count = sum(1 for s in self._states.values() if s.open_units > 0)
+            open_count = sum(1 for s in self._states.values() if s.open_units > 0)
+            print(
+                f"[position_tracker] Reconstructed from DB: "
+                f"{len(self._states)} symbols tracked, "
+                f"{open_count} open positions, "
+                f"cumulative realized P&L = ${self._total_realized_pnl:.2f}",
+                flush=True,
+            )
+            # Debug: show first 3 reconstructed states
+            for sym, state in list(self._states.items())[:3]:
                 print(
-                    f"[position_tracker] Reconstructed from DB: "
-                    f"{len(self._states)} symbols tracked, "
-                    f"{open_count} open positions, "
-                    f"cumulative realized P&L = ${self._total_realized_pnl:.2f}",
+                    f"[position_tracker]   {sym}: units={state.open_units:.6f} "
+                    f"vwap={state.vwap_entry_price:.4f}",
                     flush=True,
                 )
         except Exception as exc:
             # DB may not have WS11 columns yet (first run after migration).
-            print(f"[position_tracker] Reconstruct skipped: {exc}", flush=True)
+            import traceback
+            print(f"[position_tracker] Reconstruct ERROR: {exc}", flush=True)
+            print(traceback.format_exc(), flush=True)
 
     def process_fill(
         self,
