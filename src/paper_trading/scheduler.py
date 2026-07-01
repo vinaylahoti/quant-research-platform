@@ -32,6 +32,7 @@ from src.paper_trading.config import (
 )
 from src.paper_trading.heartbeat import HeartbeatThread, send_alert, write_heartbeat
 from src.paper_trading.logger import TradeLogger, TradeRecord
+from src.paper_trading.position_tracker import PositionTracker
 from src.paper_trading.sizer import fetch_live_universe, make_execution_config, size_symbol
 
 
@@ -53,19 +54,24 @@ def _now_utc() -> str:
 def _run_tick(
     symbols: list[str],
     logger: TradeLogger,
+    tracker: PositionTracker,
 ) -> None:
     """
-    Execute one rebalance tick: size every symbol, log results.
+    Execute one rebalance tick: size every symbol, track positions, log results.
     Unrecoverable errors propagate to the caller (scheduler halts + alerts).
     """
     cfg = make_execution_config()
     universe_size = len(symbols)
     universe_snapshot = list(symbols)
 
+    # Collect fill prices this tick for portfolio MTM at the end.
+    tick_prices: dict[str, float] = {}
+    # Store (symbol, fill_result) pairs for portfolio_value annotation.
+    fills: list[tuple[str, object]] = []
+
     for symbol in symbols:
         tick_start = time.monotonic()
         ts_decision = _now_utc()
-        error_msg: str | None = None
         record_kwargs: dict = dict(
             timestamp_decision=ts_decision,
             timestamp_fill=None,
@@ -85,6 +91,17 @@ def _run_tick(
             decision = size_symbol(symbol, universe_size=universe_size, config=cfg)
             ts_fill = _now_utc()
             latency_ms = (time.monotonic() - tick_start) * 1_000.0
+
+            # WS11: compute position fill using WS5 slippage model via tracker.
+            fill = tracker.process_fill(
+                symbol=symbol,
+                target_size_notional=decision.target_notional,
+                current_price=decision.intended_fill_price,
+                config=cfg,
+            )
+            tick_prices[symbol] = decision.intended_fill_price
+            fills.append((symbol, fill))
+
             record_kwargs.update(
                 timestamp_fill=ts_fill,
                 vol_estimate=decision.sizing.realized_volatility,
@@ -92,22 +109,40 @@ def _run_tick(
                 intended_fill_price=decision.intended_fill_price,
                 actual_fill_price=decision.actual_fill_price,
                 latency_ms=latency_ms,
+                # WS11 position fields
+                open_units_before=fill.open_units_before,
+                open_units_after=fill.open_units_after,
+                vwap_entry_price=fill.vwap_entry_price if fill.vwap_entry_price else None,
+                realized_pnl_usd=fill.realized_pnl_usd,
+                unrealized_pnl_usd=fill.unrealized_pnl_usd,
+                fee_cost_usd=fill.fee_cost_usd,
+                position_event=fill.position_event,
             )
         except Exception as exc:
             # Transient failure: already retried inside size_symbol/fetch_klines.
             # Log a null-fill row and continue to the next symbol.
-            error_msg = f"{type(exc).__name__}: {exc}"
             latency_ms = (time.monotonic() - tick_start) * 1_000.0
-            record_kwargs.update(latency_ms=latency_ms, error=error_msg)
-            print(f"[scheduler] {symbol} skipped: {error_msg}", flush=True)
+            record_kwargs.update(
+                latency_ms=latency_ms,
+                error=f"{type(exc).__name__}: {exc}",
+            )
+            print(f"[scheduler] {symbol} skipped: {exc}", flush=True)
 
         # DB write failure here is unrecoverable — let it propagate.
         logger.append(TradeRecord(**record_kwargs))
 
+    # Annotate each logged row with the end-of-tick portfolio value.
+    # We do this as a single UPDATE after all rows are inserted so that every
+    # symbol in the tick gets the same portfolio snapshot.
+    if tick_prices:
+        portfolio_val = tracker.portfolio_value(tick_prices)
+        logger.set_portfolio_value_for_tick(ts_decision, portfolio_val)
+        print(
+            f"[scheduler] Tick complete — portfolio value: ${portfolio_val:.2f}",
+            flush=True,
+        )
+
     # Heartbeat written after ALL symbols are processed (or gracefully skipped).
-    # This is the only point where write_heartbeat() is called per tick,
-    # so a DB failure above prevents the heartbeat from being written —
-    # causing the dead-man's switch to fire for any true unrecoverable error.
     write_heartbeat()
 
 
@@ -118,12 +153,13 @@ def run(*, once: bool = False) -> None:
     Args:
         once: if True, run exactly one tick and return (used by tests).
     """
-    print("[scheduler] Starting WS9 paper trading scheduler", flush=True)
+    print("[scheduler] Starting WS9+WS11 paper trading scheduler", flush=True)
 
     watchdog = HeartbeatThread()
     watchdog.start()
 
     logger = TradeLogger()
+    tracker = PositionTracker()
     symbols = _load_universe()
 
     if not symbols:
@@ -137,7 +173,7 @@ def run(*, once: bool = False) -> None:
     while True:
         tick_start_wall = time.time()
         try:
-            _run_tick(symbols, logger)
+            _run_tick(symbols, logger, tracker)
         except Exception as exc:
             # Unrecoverable tick error: alert and halt.
             # Heartbeat was NOT written, so the watchdog will also fire
