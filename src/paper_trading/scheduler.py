@@ -118,6 +118,17 @@ def _run_tick(
                 fee_cost_usd=fill.fee_cost_usd,
                 position_event=fill.position_event,
             )
+            if fill.position_event != "hold":
+                print(
+                    f"[position] {symbol:12s} {fill.position_event:8s} "
+                    f"units={fill.open_units_after:.6f} "
+                    f"vwap={fill.vwap_entry_price:.4f} "
+                    f"fill={fill.fill_price:.4f} "
+                    f"realized=${fill.realized_pnl_usd:.4f} "
+                    f"unrealized=${fill.unrealized_pnl_usd:.4f} "
+                    f"fee=${fill.fee_cost_usd:.4f}",
+                    flush=True,
+                )
         except Exception as exc:
             # Transient failure: already retried inside size_symbol/fetch_klines.
             # Log a null-fill row and continue to the next symbol.
